@@ -23,4 +23,4 @@ class Course(Base):
     )
 
     semester = relationship("Semester", back_populates="courses")
-    faculty_assignment = relationship("FacultyAssignment", back_populates="course")
+    faculty_assignments = relationship("FacultyAssignment", back_populates="course")
