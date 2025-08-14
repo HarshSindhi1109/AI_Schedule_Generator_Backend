@@ -2,5 +2,5 @@
 __pycache__/
 .idea/
 ../../.idea/
-/home/harsh_dev/PycharmProjects/FastAPIProject1/__pycache__/
+../../__pycache__/
 services/test_layout_service.py
