@@ -1,6 +1,0 @@
-*.pyc
-__pycache__/
-.idea/
-../../.idea/
-../../__pycache__/
-services/test_layout_service.py
