@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.crud import courses as crud_courses
-from typing import Optional
+from typing import List
+from app.schemas.courses import CourseBase
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -13,14 +14,14 @@ def get_db():
     finally:
         db.close()
 
-@router.post("/", response_model=dict)
-def add_course(course_data: dict, db: Session = Depends(get_db)):
+@router.post("/", response_model=CourseBase)
+def add_course(course_data: CourseBase, db: Session = Depends(get_db)):
     """
         Create a new course.
         course_data should include:
         department_name, semester_number, code, name, t_hrs, tu_hrs, p_hrs, credits
     """
-    course = crud_courses.create_course(db, course_data)
+    course = crud_courses.create_course(db, course_data.dict())
     return {
         "message": "Course created successfully",
         "course_code": course.course_code,
@@ -33,7 +34,7 @@ def add_course(course_data: dict, db: Session = Depends(get_db)):
         "credits": course.credits
     }
 
-@router.get("/", response_model=list[dict])
+@router.get("/", response_model=List[CourseBase])
 def list_courses(db: Session = Depends(get_db)):
     """
         List all courses.
@@ -53,7 +54,7 @@ def list_courses(db: Session = Depends(get_db)):
         for c in courses
     ]
 
-@router.get("/{course_name}", response_model=list[dict])
+@router.get("/{course_name}", response_model=List[CourseBase])
 def get_course_by_name(course_name: str, db: Session = Depends(get_db)):
     """
         Get course(s) by partial or full name match.
@@ -77,15 +78,15 @@ def get_course_by_name(course_name: str, db: Session = Depends(get_db)):
         for r in results
     ]
 
-@router.put("/{course_code}", response_model=dict)
-def edit_course(course_code: str, updates: dict, db: Session = Depends(get_db)):
+@router.put("/{course_code}", response_model=CourseBase)
+def edit_course(course_code: str, updates: CourseBase, db: Session = Depends(get_db)):
     """
         Update a course by course_code.
     """
     course = db.query(crud_courses.Course).filter_by(course_code=course_code).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    updated_course = crud_courses.update_course(db, course_code, updates)
+    updated_course = crud_courses.update_course(db, course_code, updates.dict(exclude_unset=True))
     return {"message": "Course updated successfully", "course_code": updated_course.course_code}
 
 @router.delete("/{course_code}", response_model=dict)

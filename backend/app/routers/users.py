@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List
-
+from app.schemas.users import UserBase
 from app.crud import users as crud_users
 from app.database import SessionLocal
 from app.models.users import User
@@ -16,7 +16,7 @@ def get_db():
     finally:
         db.close()
 
-@router.post("/", response_model=dict)
+@router.post("/", response_model=UserBase)
 def create_user(user_data: dict, db: Session = Depends(get_db)):
     """
     Create a new user.
@@ -24,14 +24,14 @@ def create_user(user_data: dict, db: Session = Depends(get_db)):
     new_user = crud_users.create_user(db, user_data)
     return {"message": "User created successfully", "user": new_user}
 
-@router.get("/", response_model=List[User])
+@router.get("/", response_model=List[UserBase])
 def get_all_users(db: Session = Depends(get_db)):
     """
     Get all users.
     """
     return crud_users.get_all_users(db)
 
-@router.get("/{user_id}", response_model=User)
+@router.get("/{user_id}", response_model=UserBase)
 def get_user(user_id: UUID, db: Session = Depends(get_db)):
     """
     Get a user by ID.
@@ -41,7 +41,7 @@ def get_user(user_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-@router.put("/{user_id}", response_model=dict)
+@router.put("/{user_id}", response_model=UserBase)
 def update_user(user_id: UUID, updates: dict, db: Session = Depends(get_db)):
     """
     Update a user by ID.
