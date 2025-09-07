@@ -11,6 +11,10 @@ redis_client = redis.Redis(
     decode_responses=True
 )
 
+def get_redis():
+    """Return the Redis client instance"""
+    return redis_client
+
 def store_assignment_constraints(key: str, constraints: Dict[str, Any]):
     """Store constraints in Redis with JSON serialization"""
     redis_client.set(key, json.dumps(constraints))
@@ -23,3 +27,13 @@ def get_assignment_constraints(key: str) -> Optional[Dict[str, Any]]:
 def generate_redis_key(faculty_name: str, course_name: str) -> str:
     """Generate unique key for Redis storage"""
     return f"faculty_constraints:{faculty_name}:{course_name}"
+
+# New functions for timetable service
+def store_timetable_data(key: str, data: Any):
+    """Generic method to store timetable-related data"""
+    redis_client.set(key, json.dumps(data))
+
+def get_timetable_data(key: str) -> Optional[Any]:
+    """Generic method to retrieve timetable-related data"""
+    data = redis_client.get(key)
+    return json.loads(data) if data else None
