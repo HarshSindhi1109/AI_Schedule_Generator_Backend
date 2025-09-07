@@ -10,6 +10,9 @@ class FacultyAssignmentConstraints(BaseModel):
     faculty_name: str
     theory: bool
     practical: bool
+    constraints: Optional[List[Dict]] = None
+
+class FacultyAssignmentsRequest(BaseModel):
     number_of_sublabs: int
     division_names: List[str]
-    constraints: Optional[List[Dict]] = None
+    assignments: List[FacultyAssignmentConstraints]

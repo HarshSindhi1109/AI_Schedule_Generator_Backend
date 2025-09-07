@@ -29,3 +29,9 @@ class TimetableInput(BaseModel):
     lecture_duration_minutes: int
     lab_duration_minutes: int
     working_days: Optional[List[str]] = None
+
+class TimetableResult(BaseModel):
+    message: str
+    grid: Any
+    conflicts: List[str]
+    attempts: int
