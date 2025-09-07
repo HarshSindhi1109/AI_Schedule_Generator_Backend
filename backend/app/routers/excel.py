@@ -9,12 +9,22 @@ from app.crud.courses import create_course
 from app.crud import departments as dept_crud
 from app.crud import semesters as sem_crud
 import json
-import redis  # <-- New import
+import redis
+import os
+from dotenv import load_dotenv
 
 router = APIRouter(prefix="/excel", tags=["Excel Upload"])
 
+load_dotenv()
+
 # Connect to Redis
-redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+redis_client = redis.Redis(
+    host="localhost",
+    port=6379,
+    db=0,
+    password=os.getenv("REDIS_PASSWORD"),
+    decode_responses=True
+)
 
 def get_db():
     db = SessionLocal()
@@ -22,7 +32,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
 
 @router.post("/upload")
 async def upload_excel(
@@ -52,7 +61,7 @@ async def upload_excel(
                 "semester_number": semester_number
             })
 
-        # 3. Dynamically build breaks list
+        # 3. Build breaks list
         breaks = []
         for i in range(no_of_breaks):
             if i < len(break_start_times) and i < len(break_end_times):
@@ -62,7 +71,7 @@ async def upload_excel(
                     "name": f"Break {i + 1}"
                 })
 
-        # 4. Save timetable settings to Redis
+        # 4. Save timetable settings in Redis
         timetable_settings = {
             "start_time": start_time,
             "end_time": end_time,
@@ -74,17 +83,16 @@ async def upload_excel(
         }
         redis_client.set("timetable_settings", json.dumps(timetable_settings))
 
-        # 5. Store courses
+        # 5. Store courses in DB
         file_bytes = await file.read()
         courses = extract_courses_from_excel(file_bytes)
         for course in courses:
             course["department_name"] = department_name
             course["semester_number"] = semester_number
             create_course(db, course)
-
         db.commit()
 
-        # 6. Run layout service with stored variables
+        # 6. Generate timetable layout
         timetable_layout = generate_timetable_layout(
             start_time_str=start_time,
             end_time_str=end_time,
@@ -93,8 +101,9 @@ async def upload_excel(
             lab_duration_minutes=minutes_per_lab
         )
 
-        # NEW: Store layout in Redis
-        redis_client.set("timetable_layout", json.dumps(timetable_layout))
+        # 7. Save layout in Redis
+        rkey_layout = f"tt:{department_name}:{semester_number}:layout"
+        redis_client.set(rkey_layout, json.dumps(timetable_layout), ex=300)
 
         return {
             "message": "Data stored in DB & Redis, timetable layout generated",
@@ -105,6 +114,9 @@ async def upload_excel(
     except SQLAlchemyError as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except redis.RedisError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")

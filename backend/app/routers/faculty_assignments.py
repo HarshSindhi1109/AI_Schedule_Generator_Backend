@@ -1,21 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app import models
 from app.schemas.faculty_assignments import (
     FacultyAssignmentBase,
-    FacultyAssignmentConstraints
+    FacultyAssignmentConstraints,
+    FacultyAssignmentsRequest
 )
 from app.crud.faculty_assignments import create_faculty_assignment, get_course_by_name
 from app.utils.redis_client import (
     store_assignment_constraints,
-    generate_redis_key
+    generate_redis_key,
+    get_redis
 )
 from typing import List
 from app.services.constraint_service import get_assignment_constraints
+from app.services.timetable_service import generate_timetable
+from uuid import UUID
+import json
+import logging
+
+logger = logging.getLogger(__name__)  # Add this for logging
 
 router = APIRouter(prefix="/faculty-assignments", tags=["Faculty Assignments"])
 
+DUMMY_USER_ID = UUID("00000000-0000-0000-0000-000000000000") # Delete when frontend is ready
 
 def get_db():
     db = SessionLocal()
@@ -58,19 +67,21 @@ def get_faculty_and_subjects_by_name(
 
 
 @router.post("/with-constraints")
-def create_assignment_with_constraints(
-        department_name: str,
-        semester_number: int,
-        assignments: List[FacultyAssignmentConstraints] = Body(...),
+def create_faculty_assignments_with_constraints(
+        request: FacultyAssignmentsRequest,
+        department_name: str = Query(..., alias="department_name"),
+        semester_number: int = Query(..., alias="semester_number"),
         db: Session = Depends(get_db)
 ):
     """
-    Create faculty assignments with constraints stored in Redis
+    Create faculty assignments with constraints stored in Redis,
+    then return generated timetable.
     """
     results = []
     errors = []
+    consolidated_assignments = []  # For storing assignments in timetable format
 
-    for assignment in assignments:
+    for assignment in request.assignments:
         # 1. Get course details from database
         course = get_course_by_name(
             db,
@@ -97,12 +108,12 @@ def create_assignment_with_constraints(
             errors.append(f"Duplicate assignment: {assignment.faculty_name} for {assignment.course_name}")
             continue
 
-        # 3. Prepare constraints data
+        # 3. Prepare constraints data (using global request fields)
         constraints_data = {
             "theory": assignment.theory,
             "practical": assignment.practical,
-            "number_of_sublabs": assignment.number_of_sublabs,
-            "division_names": assignment.division_names,
+            "number_of_sublabs": request.number_of_sublabs,
+            "division_names": request.division_names,
             "constraints": assignment.constraints or []
         }
 
@@ -118,11 +129,33 @@ def create_assignment_with_constraints(
                 "faculty": assignment.faculty_name,
                 "redis_key": redis_key
             })
+
+            # Add to consolidated assignments list for timetable service
+            consolidated_assignments.append({
+                "course_name": assignment.course_name,
+                "faculty_name": assignment.faculty_name,
+                "theory": assignment.theory,
+                "practical": assignment.practical,
+                "number_of_sublabs": request.number_of_sublabs,
+                "division_names": request.division_names,
+                "constraints": assignment.constraints or []
+            })
         except Exception as e:
             errors.append(f"Redis storage failed for {assignment.course_name}: {str(e)}")
-            # Rollback DB assignment if Redis fails
             db.delete(db_assignment)
             db.commit()
+
+    # 5. Store consolidated assignments in Redis for timetable service
+    if consolidated_assignments:
+        r = get_redis()
+        rkey = f"tt:{department_name}:{semester_number}:faculty"
+        try:
+            r.set(rkey, json.dumps(consolidated_assignments))
+            logger.info(f"Stored consolidated assignments in Redis: {rkey}")
+        except Exception as e:
+            errors.append(f"Failed to store consolidated assignments: {str(e)}")
+    else:
+        errors.append("No valid assignments to consolidate")
 
     if errors:
         return {
@@ -131,12 +164,27 @@ def create_assignment_with_constraints(
             "results": results,
             "errors": errors
         }
+
+    # Generate timetable
+    try:
+        timetable_output = generate_timetable(
+            db=db,
+            dept=department_name,
+            sem=semester_number,
+            user_id=DUMMY_USER_ID,
+            persist_to_db=True
+        )
+    except Exception as e:
+        # Log the full error for debugging
+        logger.error(f"Timetable generation failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Timetable generation failed: {str(e)}")
+
     return {
         "success": True,
         "message": "All assignments created successfully",
-        "results": results
+        "results": results,
+        "timetable": timetable_output
     }
-
 
 @router.get("/constraints/{faculty_name}/{course_name}")
 def get_assignment_constraints_endpoint(

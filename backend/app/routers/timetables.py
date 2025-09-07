@@ -1,13 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
+#from redis.commands.search.query import Query
 from sqlalchemy.orm import Session
 from uuid import UUID
-from typing import List
+from typing import List, Optional
 from app.crud import timetables as crud_timetables
 from app.database import SessionLocal
 from app.models.timetables import Timetable
-from app.schemas.timetables import TimetableBase, TimetableInput
-from fastapi import Body
+from app.schemas.timetables import TimetableBase, TimetableInput, TimetableResult
 from app.services.layout_service import generate_timetable_layout
+from app.services.timetable_service import generate_timetable
 
 router = APIRouter(prefix="/timetables", tags=["Timetables"])
 
@@ -82,3 +83,29 @@ def generate_layout(data: TimetableInput = Body(...)):
         return layout
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/generate", response_model=TimetableResult)
+def generate_timetable_endpoint(
+    department_name: str = Query(..., description="Department name"),
+    semester_number: int = Query(..., description="Semester number"),
+    user_id: Optional[int] = Query(None, description="Optional user ID"),
+    persist_to_db: bool = Query(False, description="Persist into DB"),
+    db: Session = Depends(get_db)
+):
+    try:
+        out = generate_timetable(
+            db=db,
+            dept=department_name,
+            sem=semester_number,
+            user_id=user_id,
+            persist_to_db=persist_to_db
+        )
+        return TimetableResult(message="Timetable Generated", **out)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {str(e)}"
+        )
