@@ -3,6 +3,7 @@ from sqlalchemy import select
 from app.models.courses import Course
 from app.models.semesters import Semester
 from app.models.departments import Department
+from typing import List
 
 def create_course(db: Session, course_data: dict):
     course = Course(**course_data)
@@ -33,6 +34,22 @@ def get_course_by_name(db: Session, course_name: str):
 
     results = db.execute(stmt).all()
     return results
+
+def get_courses_for_department_semester(
+    db: Session,
+    department_name: str,
+    semester_number: int
+) -> List[Course]:
+    return (
+        db.query(Course)
+        .join(Semester)
+        .join(Department)
+        .filter(
+            Department.name == department_name,
+            Semester.semester_number == semester_number
+        )
+        .all()
+    )
 
 def update_course(db: Session, course, updates: dict):
     for key, value in updates.items():
