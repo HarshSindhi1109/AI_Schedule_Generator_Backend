@@ -3,11 +3,12 @@ from app.models.users import User
 from uuid import UUID
 
 def create_user(db: Session, user_data: dict):
-    user = User(**user_data)
-    db.add(user)
+    # Create user with provided data or defaults
+    db_user = User(**user_data)
+    db.add(db_user)
     db.commit()
-    db.refresh(user)
-    return user
+    db.refresh(db_user)
+    return db_user
 
 def get_all_users(db: Session):
     return db.query(User).all()
