@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List
-from app.schemas.users import UserBase
+from app.schemas.users import UserBase, UserCreate
 from app.crud import users as crud_users
 from app.database import SessionLocal
 from app.models.users import User
@@ -16,13 +16,19 @@ def get_db():
     finally:
         db.close()
 
+# Update the create_user endpoint
 @router.post("/", response_model=UserBase)
-def create_user(user_data: dict, db: Session = Depends(get_db)):
+def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
     """
     Create a new user.
     """
-    new_user = crud_users.create_user(db, user_data)
-    return {"message": "User created successfully", "user": new_user}
+    # Use provided ID or generate a new one
+    user_dict = {}
+    if user_data.id:
+        user_dict["id"] = user_data.id
+
+    new_user = crud_users.create_user(db, user_dict)
+    return new_user
 
 @router.get("/", response_model=List[UserBase])
 def get_all_users(db: Session = Depends(get_db)):

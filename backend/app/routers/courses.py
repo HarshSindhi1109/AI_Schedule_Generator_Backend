@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.crud import courses as crud_courses
-from typing import List
+from typing import List, Optional
 from app.schemas.courses import CourseBase
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -34,12 +34,26 @@ def add_course(course_data: CourseBase, db: Session = Depends(get_db)):
         "credits": course.credits
     }
 
+
 @router.get("/", response_model=List[CourseBase])
-def list_courses(db: Session = Depends(get_db)):
+def list_courses(
+        department_name: Optional[str] = Query(None, description="Filter by department name"),
+        semester_number: Optional[int] = Query(None, description="Filter by semester number"),
+        db: Session = Depends(get_db)
+):
     """
-        List all courses.
+    List all courses, optionally filtered by department and semester.
     """
+    # Get all courses first
     courses = crud_courses.get_all_courses(db)
+
+    # Apply filters if provided
+    if department_name:
+        courses = [c for c in courses if c.department_name == department_name]
+
+    if semester_number is not None:
+        courses = [c for c in courses if c.semester_number == semester_number]
+
     return [
         {
             "department_name": c.department_name,

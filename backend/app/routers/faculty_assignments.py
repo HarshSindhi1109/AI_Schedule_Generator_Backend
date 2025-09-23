@@ -19,12 +19,11 @@ from app.services.timetable_service import generate_timetable
 from uuid import UUID
 import json
 import logging
+from app.dependencies.auth import get_current_user
 
 logger = logging.getLogger(__name__)  # Add this for logging
 
 router = APIRouter(prefix="/faculty-assignments", tags=["Faculty Assignments"])
-
-DUMMY_USER_ID = UUID("00000000-0000-0000-0000-000000000000") # Delete when frontend is ready
 
 def get_db():
     db = SessionLocal()
@@ -71,7 +70,8 @@ def create_faculty_assignments_with_constraints(
         request: FacultyAssignmentsRequest,
         department_name: str = Query(..., alias="department_name"),
         semester_number: int = Query(..., alias="semester_number"),
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        user_id: str = Depends(get_current_user)
 ):
     """
     Create faculty assignments with constraints stored in Redis,
@@ -171,19 +171,114 @@ def create_faculty_assignments_with_constraints(
             db=db,
             dept=department_name,
             sem=semester_number,
-            user_id=DUMMY_USER_ID,
+            user_id=user_id,
             persist_to_db=True
         )
     except Exception as e:
         # Log the full error for debugging
         logger.error(f"Timetable generation failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Timetable generation failed: {str(e)}")
+
+        # Return a more informative error message
+        error_detail = f"Timetable generation failed: {str(e)}"
+        if "conflicts" in str(e).lower():
+            error_detail += ". There were too many scheduling conflicts. Please adjust your constraints and try again."
+
+        raise HTTPException(status_code=500, detail=error_detail)
+
+    # 6. Extract layout information from Redis
+    r = get_redis()
+    rkey_layout = f"tt:{department_name}:{semester_number}:layout"
+
+    try:
+        layout_data = json.loads(r.get(rkey_layout) or "{}")
+        layout = layout_data.get("layout", {})
+
+        # Extract start_time and end_time from time_slots
+        time_slots = layout.get("time_slots", [])
+        start_time = None
+        end_time = None
+
+        if time_slots:
+            # Sort time slots to get the earliest start and latest end
+            sorted_slots = sorted(time_slots, key=lambda x: x.get("start", ""))
+            start_time = sorted_slots[0].get("start") if sorted_slots else None
+            end_time = sorted_slots[-1].get("end") if sorted_slots else None
+
+        # FIXED: Extract breaks from layout instead of grid, and use proper structure
+        breaks = []
+
+        # First try to get breaks from layout configuration
+        if layout.get("breaks"):
+            for break_item in layout.get("breaks", []):
+                if break_item.get("start_time") and break_item.get("end_time"):
+                    breaks.append({
+                        "start_time": break_item["start_time"],
+                        "end_time": break_item["end_time"],
+                        "name": break_item.get("name", "Break")
+                    })
+
+        # Fallback: Extract breaks from grid if not found in layout
+        if not breaks:
+            grid = layout_data.get("grid", {})
+            break_intervals = set()  # Use set to avoid duplicates
+
+            for day, day_schedule in grid.items():
+                if not isinstance(day_schedule, dict):
+                    continue
+
+                for time_slot, activities in day_schedule.items():
+                    if activities and isinstance(activities, (list, dict)):
+                        # Handle both list and single dict formats
+                        activities_list = activities if isinstance(activities, list) else [activities]
+
+                        for activity in activities_list:
+                            if isinstance(activity, dict) and activity.get("type") in ("break", "Break"):
+                                # Extract time slot components
+                                if '-' in time_slot:
+                                    start, end = time_slot.split('-')
+                                    break_intervals.add((start, end))
+
+            # Convert unique break intervals to proper format
+            for start, end in break_intervals:
+                breaks.append({
+                    "start_time": start,
+                    "end_time": end,
+                    "name": "Break"
+                })
+
+        # FIXED: Change slot_duration to minutes_per_lecture to match frontend expectation
+        slot_duration = layout.get("slot_duration", 55)
+        lab_minutes = layout.get("lab_minutes", 110)
+
+        config = {
+            "start_time": start_time or "07:30",
+            "end_time": end_time or "13:40",
+            "minutes_per_lecture": slot_duration,  # FIXED: Changed key name
+            "lab_minutes": lab_minutes,
+            "breaks": breaks
+        }
+
+    except (json.JSONDecodeError, KeyError, AttributeError) as e:
+        logger.error(f"Failed to extract layout information: {str(e)}")
+        # Provide default config if layout extraction fails
+        config = {
+            "start_time": "07:30",
+            "end_time": "13:40",
+            "minutes_per_lecture": 55,
+            "lab_minutes": 110,
+            "breaks": []
+        }
+
+    # FIXED: Return proper structure with grid and config at top level
+    # Extract grid from timetable_output and combine with config
+    if isinstance(timetable_output, dict) and 'grid' in timetable_output:
+        grid_data = timetable_output['grid']
+    else:
+        grid_data = timetable_output
 
     return {
-        "success": True,
-        "message": "All assignments created successfully",
-        "results": results,
-        "timetable": timetable_output
+        "grid": grid_data,
+        "config": config
     }
 
 @router.get("/constraints/{faculty_name}/{course_name}")
