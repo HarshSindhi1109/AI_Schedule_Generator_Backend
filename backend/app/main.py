@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.routers import (
     departments,
     semesters,
@@ -13,6 +14,15 @@ app = FastAPI(
     title="Timetable",
     description="API for managing departments, semesters, users, courses, faculty assignments, and timetables.",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # The port where your React app is running
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(departments.router)
