@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import uuid
+from uuid import UUID
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple, Set
 from collections import defaultdict
@@ -151,7 +152,6 @@ def _course_needs_from_db_and_redis(
         db: Session,
         dept: str,
         sem: int,
-        user_id: Optional[int],
         r
 ) -> List[CourseNeed]:
     logger.debug(f"Retrieving courses for dept='{dept}', sem={sem}")
@@ -661,13 +661,7 @@ def simplify_grid(grid: Dict, time_labels: List[str], lab_slot_len: int) -> Dict
     return simplified
 
 
-def generate_timetable(
-        db: Session,
-        dept: str,
-        sem: int,
-        user_id: Optional[int] = None,
-        persist_to_db: bool = True
-) -> Dict[str, Any]:
+def generate_timetable(db, dept, sem, user_id=None, persist_to_db=False) -> Dict[str, Any]:
     r = get_redis()
     rkey_layout = f"tt:{dept}:{sem}:layout"
 
@@ -679,6 +673,12 @@ def generate_timetable(
 
     layout = state.get("layout", {})
     grid = state.get("grid", {})
+
+    # Check if time_slots exists in layout
+    if "time_slots" not in layout:
+        logger.error(f"Missing time_slots in layout for dept={dept}, sem={sem}")
+        # Try to get time_slots from a default configuration or raise a more specific error
+        raise ValueError("Timetable layout is incomplete. Please ensure the schedule form was submitted correctly.")
 
     time_labels = _collect_time_labels(layout)
     slot_duration = int(layout.get("slot_duration", 55))
@@ -702,7 +702,7 @@ def generate_timetable(
                     busy_divisions[day][slot].add(division)
 
     # Get course needs and create tasks
-    needs = _course_needs_from_db_and_redis(db, dept, sem, user_id, r)
+    needs = _course_needs_from_db_and_redis(db, dept, sem, r)
     logger.debug(f"Found {len(needs)} courses with faculty assignments")
 
     tasks = []
@@ -767,15 +767,17 @@ def generate_timetable(
     simplified_grid = simplify_grid(grid, time_labels, lab_slot_len)
 
     result = {
-        "grid": simplified_grid,
-        "conflicts": all_conflicts,
-        "attempts": retry_count + 1
+        "grid": simplified_grid
     }
 
-    if persist_to_db:
+    if persist_to_db and user_id:
+        # Save to database with user association
         crud_timetables.save_timetable_json(
-            db=db, dept=dept, sem=sem,
-            user_id=user_id, timetable_json=result
+            db=db,
+            dept=dept,
+            sem=sem,
+            user_id=user_id,  # Pass the user_id
+            timetable_json=result,
         )
 
     return result
